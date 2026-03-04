@@ -1,11 +1,22 @@
 import { Suspense, lazy } from 'react';
 import './App.css';
+import './components/Header.css';
+import AnnouncementBar from './components/AnnouncementBar';
+import Header from './components/Header';
 
 const PlasmaWave = lazy(() => import('./components/PlasmaWave'));
 
 function App() {
   return (
     <div className="app">
+      <AnnouncementBar
+        message="React Bits Pro is here - 65 components, 100+ UI blocks, 5 full templates -"
+        link="https://pro.reactbits.dev"
+        linkText="check it out!"
+      />
+
+      <Header activeItem="home" />
+
       <section className="hero">
         <Suspense fallback={null}>
           <PlasmaWave
@@ -26,10 +37,7 @@ function App() {
           </p>
           <div className="hero-buttons">
             <a href="https://github.com/DavidHDev/react-bits" target="_blank" rel="noopener noreferrer" className="btn btn-primary">
-              View Source
-            </a>
-            <a href="https://reactbits.dev" target="_blank" rel="noopener noreferrer" className="btn btn-secondary">
-              React Bits
+              Browse Components
             </a>
           </div>
         </div>
