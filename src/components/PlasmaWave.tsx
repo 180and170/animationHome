@@ -93,6 +93,32 @@ void main() {
 }
 `;
 
+interface PlasmaWaveProps {
+  xOffset?: number;
+  yOffset?: number;
+  rotationDeg?: number;
+  focalLength?: number;
+  speed1?: number;
+  speed2?: number;
+  dir2?: number;
+  bend1?: number;
+  bend2?: number;
+  fadeInDuration?: number;
+}
+
+interface PlasmaWavePropsInternal {
+  xOffset: number;
+  yOffset: number;
+  rotationDeg: number;
+  focalLength: number;
+  speed1: number;
+  speed2: number;
+  dir2: number;
+  bend1: number;
+  bend2: number;
+  fadeInDuration: number;
+}
+
 export default function PlasmaWave({
   xOffset = 0,
   yOffset = 0,
@@ -104,18 +130,20 @@ export default function PlasmaWave({
   bend1 = 1,
   bend2 = 0.5,
   fadeInDuration = 2000,
-}) {
+}: PlasmaWaveProps) {
   const [fallbackActive, setFallbackActive] = useState(false);
-  const containerRef = useRef(null);
+  const containerRef = useRef<HTMLDivElement>(null);
   const uniformOffset = useRef(new Float32Array([xOffset, yOffset]));
   const uniformResolution = useRef(new Float32Array([1, 1]));
-  const fadeStartTime = useRef(null);
+  const fadeStartTime = useRef<number | null>(null);
   const startTimeRef = useRef(0);
-  const resizeTimeoutRef = useRef(null);
-  const rafRef = useRef(null);
+  const resizeTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const rafRef = useRef<number | null>(null);
   const runningRef = useRef(false);
 
-  const propsRef = useRef({});
+  const propsRef = useRef<PlasmaWavePropsInternal>({
+    xOffset, yOffset, rotationDeg, focalLength, speed1, speed2, dir2, bend1, bend2, fadeInDuration,
+  });
   useEffect(() => {
     propsRef.current = { xOffset, yOffset, rotationDeg, focalLength, speed1, speed2, dir2, bend1, bend2, fadeInDuration };
   });
@@ -123,7 +151,7 @@ export default function PlasmaWave({
   useEffect(() => {
     if (fallbackActive) return;
 
-    const createRenderer = () => {
+    const createRenderer = (): Renderer | null => {
       const commonOpts = {
         alpha: true,
         dpr: 0.5,
@@ -132,8 +160,8 @@ export default function PlasmaWave({
         stencil: false,
         premultipliedAlpha: false,
         preserveDrawingBuffer: false,
-        powerPreference: 'high-performance',
-        failIfMajorPerformanceCaveat: false
+        powerPreference: 'high-performance' as const,
+        failIfMajorPerformanceCaveat: false,
       };
 
       try {
@@ -141,15 +169,14 @@ export default function PlasmaWave({
       } catch {
         try {
           const canvas = document.createElement('canvas');
-          const attrs = {
+          const attrs: WebGLContextAttributes = {
             alpha: true, antialias: false, depth: false, stencil: false,
             premultipliedAlpha: false, preserveDrawingBuffer: false,
-            powerPreference: 'high-performance', failIfMajorPerformanceCaveat: false
+            powerPreference: 'high-performance', failIfMajorPerformanceCaveat: false,
           };
           const gl =
             canvas.getContext('webgl2', attrs) ||
-            canvas.getContext('webgl', attrs) ||
-            canvas.getContext('experimental-webgl', attrs);
+            canvas.getContext('webgl', attrs);
           if (!gl) return null;
           return new Renderer({ ...commonOpts, gl });
         } catch {
@@ -166,7 +193,7 @@ export default function PlasmaWave({
 
     const gl = renderer.gl;
     gl.clearColor(0, 0, 0, 0);
-    containerRef.current.appendChild(gl.canvas);
+    containerRef.current!.appendChild(gl.canvas);
 
     const camera = new Camera(gl);
     const scene = new Transform();
@@ -188,8 +215,8 @@ export default function PlasmaWave({
         bend2: { value: bend2 },
         bendAdj1: { value: 0 },
         bendAdj2: { value: 0 },
-        uOpacity: { value: 0 }
-      }
+        uOpacity: { value: 0 },
+      },
     });
     new Mesh(gl, { geometry, program }).setParent(scene);
 
@@ -197,7 +224,8 @@ export default function PlasmaWave({
       const el = containerRef.current;
       if (!el) return;
       const { width, height } = el.getBoundingClientRect();
-      const rw = width * renderer.dpr, rh = height * renderer.dpr;
+      const rw = width * renderer.dpr;
+      const rh = height * renderer.dpr;
       if (rw === uniformResolution.current[0] && rh === uniformResolution.current[1]) return;
       renderer.setSize(width, height);
       uniformResolution.current[0] = rw;
@@ -215,14 +243,14 @@ export default function PlasmaWave({
       }, 150);
     };
     const ro = new ResizeObserver(resize);
-    ro.observe(containerRef.current);
+    ro.observe(containerRef.current!);
 
     startTimeRef.current = performance.now();
 
-    const loop = now => {
+    const loop = (now: number) => {
       const {
         xOffset: xOff, yOffset: yOff, rotationDeg: rot,
-        focalLength: fLen, fadeInDuration: fadeDur
+        focalLength: fLen, fadeInDuration: fadeDur,
       } = propsRef.current;
       const t = (now - startTimeRef.current) * 0.001;
       if (fadeStartTime.current === null && t > 0.1) fadeStartTime.current = now;
@@ -268,7 +296,7 @@ export default function PlasmaWave({
           position: 'absolute', inset: 0, overflow: 'hidden',
           width: '100%', height: '100%', pointerEvents: 'none',
           background:
-            'radial-gradient(1200px 600px at 20% 80%, rgba(123, 31, 162, 0.3), transparent 60%), radial-gradient(1000px 500px at 80% 20%, rgba(33, 150, 243, 0.25), transparent 60%), linear-gradient(180deg, rgba(10, 2, 20, 0.6), rgba(10, 2, 20, 0.8))'
+            'radial-gradient(1200px 600px at 20% 80%, rgba(123, 31, 162, 0.3), transparent 60%), radial-gradient(1000px 500px at 80% 20%, rgba(33, 150, 243, 0.25), transparent 60%), linear-gradient(180deg, rgba(10, 2, 20, 0.6), rgba(10, 2, 20, 0.8))',
         }}
       />
     );
@@ -281,14 +309,14 @@ export default function PlasmaWave({
         opacity: 0.6,
         position: 'absolute', inset: 0, overflow: 'hidden',
         width: '100%', height: '100%', pointerEvents: 'none',
-        willChange: 'opacity'
+        willChange: 'opacity',
       }}
     >
       <div
         style={{
           position: 'absolute', bottom: 0, left: 0, right: 0, height: 200,
           background: 'linear-gradient(to top, #060010, transparent)',
-          pointerEvents: 'none', zIndex: 1
+          pointerEvents: 'none', zIndex: 1,
         }}
       />
     </div>
