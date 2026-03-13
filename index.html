@@ -1,0 +1,952 @@
+<!DOCTYPE html>
+<html lang="zh">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>博学猫 — Scholar Cat</title>
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    html, body {
+      width: 100%; height: 100%;
+      background: #0d0600;
+      display: flex; align-items: center; justify-content: center;
+      overflow: hidden;
+      font-family: Georgia, serif;
+    }
+    #c { display: block; image-rendering: auto; cursor: default; }
+  </style>
+</head>
+<body>
+<canvas id="c"></canvas>
+<script>
+'use strict';
+
+/* ─── canvas setup ──────────────────────────────────────────────────────── */
+const c = document.getElementById('c');
+const g = c.getContext('2d');
+const W = 1600, H = 900;
+c.width = W; c.height = H;
+
+function onResize() {
+  const s = Math.min(window.innerWidth / W, window.innerHeight / H);
+  c.style.width  = (W * s) + 'px';
+  c.style.height = (H * s) + 'px';
+}
+window.addEventListener('resize', onResize);
+onResize();
+
+/* ─── colour palette ────────────────────────────────────────────────────── */
+const INK    = '#1a0c04';
+const INK2   = '#3b1f0b';
+const SEPIA  = '#7c4e24';
+const SEP_L  = '#b87d42';
+const PAPER  = '#f5e8c8';
+const PAPER2 = '#e0c898';
+const PAPER3 = '#c8a870';
+
+/* ─── pre-bake grain texture ────────────────────────────────────────────── */
+const GSZ = 512;
+const gC  = document.createElement('canvas');
+gC.width = gC.height = GSZ;
+const gX  = gC.getContext('2d');
+const gD  = gX.createImageData(GSZ, GSZ);
+for (let i = 0; i < gD.data.length; i += 4) {
+  const v = Math.random() * 220 | 0;
+  gD.data[i]   = v;
+  gD.data[i+1] = (v * 0.78) | 0;
+  gD.data[i+2] = (v * 0.45) | 0;
+  gD.data[i+3] = Math.random() * 28 | 0;
+}
+gX.putImageData(gD, 0, 0);
+
+/* ─── helpers ───────────────────────────────────────────────────────────── */
+function lerp(a, b, n) { return a + (b - a) * n; }
+function n1(x)  { return Math.sin(x*1.23+0.5)*0.5 + Math.sin(x*2.71+1.3)*0.3 + Math.sin(x*5.19+0.9)*0.2; }
+function n2(x)  { return Math.sin(x*3.17+2.1)*0.4 + Math.sin(x*7.83+0.7)*0.3 + Math.sin(x*11.3+3.5)*0.3; }
+function easeInOut(t) { return t < 0.5 ? 2*t*t : -1+(4-2*t)*t; }
+
+/**
+ * Fill the *currently defined* path with parallel hatch lines.
+ * Must be called right after g.beginPath() … path definition,
+ * before g.fill() / g.stroke().
+ */
+function hatch(angle, spacing, lw, color, alpha) {
+  g.save();
+  g.clip();
+  g.strokeStyle = color;
+  g.lineWidth   = lw;
+  g.globalAlpha = alpha;
+  const d = Math.hypot(W, H);
+  const cs = Math.cos(angle), sn = Math.sin(angle);
+  g.beginPath();
+  for (let p = -d; p < d; p += spacing) {
+    g.moveTo(-d * sn + p * cs,  d * cs + p * sn);
+    g.lineTo( d * sn + p * cs, -d * cs + p * sn);
+  }
+  g.stroke();
+  g.restore();
+}
+
+/* Draw the same path again and call hatch — convenience wrapper */
+function pathAndHatch(pathFn, angle, spacing, lw, color, alpha) {
+  g.beginPath(); pathFn();
+  hatch(angle, spacing, lw, color, alpha);
+}
+
+/* ─── state ─────────────────────────────────────────────────────────────── */
+let t = 0;
+let nextGlasses = 5.5;   // seconds until next glasses-push event
+let glassesT    = -999;  // when the push started
+
+/* ─── DRAW: paper background ─────────────────────────────────────────────── */
+function drawBg() {
+  const rg = g.createRadialGradient(W*0.42, H*0.42, 60, W*0.5, H*0.5, W*0.8);
+  rg.addColorStop(0,   '#faf2d8');
+  rg.addColorStop(0.35,'#f0ddb0');
+  rg.addColorStop(0.65,'#ddc48a');
+  rg.addColorStop(1,   '#a87040');
+  g.fillStyle = rg;
+  g.fillRect(0, 0, W, H);
+
+  // subtle horizontal paper fibre lines
+  g.strokeStyle = 'rgba(100,55,18,0.055)';
+  g.lineWidth = 0.7;
+  for (let y = 0; y < H; y += 3) {
+    g.beginPath();
+    g.moveTo(0,  y + n1(y*0.09)*0.6);
+    g.lineTo(W,  y + n1(y*0.09+8)*0.6);
+    g.stroke();
+  }
+
+  // faint vertical striation
+  g.strokeStyle = 'rgba(80,40,10,0.03)';
+  g.lineWidth = 1.2;
+  for (let x = 0; x < W; x += 8) {
+    g.beginPath();
+    g.moveTo(x + n1(x*0.05)*1.5, 0);
+    g.lineTo(x + n1(x*0.05+4)*1.5, H);
+    g.stroke();
+  }
+}
+
+/* ─── DRAW: candle ambient glow ─────────────────────────────────────────── */
+function drawCandleGlow() {
+  const flick = 1 + Math.sin(t*7.31)*0.07 + Math.sin(t*13.7)*0.04 + Math.sin(t*23.1)*0.02;
+  const cx = 1105, cy = 555;
+  const r   = 420 * flick;
+
+  const rg = g.createRadialGradient(cx, cy-20, 0, cx, cy, r);
+  rg.addColorStop(0,    'rgba(255,195,70,0.42)');
+  rg.addColorStop(0.25, 'rgba(230,140,35,0.22)');
+  rg.addColorStop(0.55, 'rgba(190,90,10,0.10)');
+  rg.addColorStop(0.8,  'rgba(140,55,5,0.04)');
+  rg.addColorStop(1,    'rgba(0,0,0,0)');
+  g.fillStyle = rg;
+  g.fillRect(0, 0, W, H);
+}
+
+/* ─── DRAW: museum artifact silhouettes (background) ────────────────────── */
+function drawArtifacts() {
+  g.save();
+  g.globalAlpha = 0.14;
+  g.fillStyle   = INK2;
+  g.strokeStyle = INK2;
+
+  /* ── Amphora (left) ───────────────────────────────────────────────── */
+  const ax = 195, ay = 610;
+  g.lineWidth = 2;
+  g.beginPath();
+  // right side of amphora
+  g.moveTo(ax,    ay - 200);
+  g.bezierCurveTo(ax+18,  ay-175, ax+55,  ay-130, ax+62,  ay-75);
+  g.bezierCurveTo(ax+78,  ay-20,  ax+72,  ay+85,  ax+44,  ay+130);
+  g.lineTo(ax+32, ay+140);
+  g.lineTo(ax-32, ay+140);
+  g.lineTo(ax-44, ay+130);
+  g.bezierCurveTo(ax-72,  ay+85,  ax-78,  ay-20,  ax-62,  ay-75);
+  g.bezierCurveTo(ax-55,  ay-130, ax-18,  ay-175, ax,     ay-200);
+  g.closePath();
+  g.fill();
+  // left handle
+  g.beginPath();
+  g.moveTo(ax-54, ay-68);
+  g.bezierCurveTo(ax-95, ay-80, ax-98, ay-15, ax-54, ay+15);
+  g.stroke();
+  // right handle
+  g.beginPath();
+  g.moveTo(ax+54, ay-68);
+  g.bezierCurveTo(ax+95, ay-80, ax+98, ay-15, ax+54, ay+15);
+  g.stroke();
+  // rim top
+  g.fillRect(ax-28, ay-210, 56, 12);
+  // decorative band
+  g.globalAlpha = 0.07;
+  g.strokeStyle = PAPER;
+  g.lineWidth = 3;
+  g.beginPath();
+  g.moveTo(ax-60, ay-40);
+  g.bezierCurveTo(ax-62, ay-35, ax+62, ay-35, ax+60, ay-40);
+  g.stroke();
+  g.beginPath();
+  g.moveTo(ax-60, ay-40+8);
+  g.bezierCurveTo(ax-62, ay-35+8, ax+62, ay-35+8, ax+60, ay-40+8);
+  g.stroke();
+  g.globalAlpha = 0.14;
+
+  /* ── Column (far right) ───────────────────────────────────────────── */
+  const colX = 1420, colY = 80;
+  const cW = 72, cH = 600;
+  g.fillStyle = INK2;
+  g.strokeStyle = INK2;
+  g.lineWidth = 2;
+  // capital
+  g.fillRect(colX - cW*0.78, colY,    cW*1.56, 22);
+  g.fillRect(colX - cW*0.6,  colY+22, cW*1.2,  15);
+  // shaft
+  g.beginPath();
+  g.moveTo(colX - cW*0.5, colY+37);
+  g.bezierCurveTo(colX-cW*0.55, colY+cH*0.33, colX-cW*0.55, colY+cH*0.66, colX-cW*0.5, colY+cH);
+  g.lineTo(colX+cW*0.5, colY+cH);
+  g.bezierCurveTo(colX+cW*0.55, colY+cH*0.66, colX+cW*0.55, colY+cH*0.33, colX+cW*0.5, colY+37);
+  g.closePath();
+  g.fill();
+  // base
+  g.fillRect(colX-cW*0.6, colY+cH, cW*1.2, 18);
+  g.fillRect(colX-cW*0.75, colY+cH+18, cW*1.5, 14);
+  // fluting
+  g.globalAlpha = 0.06;
+  g.strokeStyle = PAPER;
+  g.lineWidth = 2;
+  for (let i = 1; i < 7; i++) {
+    const lx = colX - cW*0.5 + (cW * i / 7);
+    g.beginPath(); g.moveTo(lx, colY+39); g.lineTo(lx, colY+cH); g.stroke();
+  }
+  g.globalAlpha = 0.14;
+
+  /* ── Scroll (right-centre) ────────────────────────────────────────── */
+  const sx = 1320, sy = 640;
+  g.fillStyle = INK2;
+  g.strokeStyle = INK2;
+  g.lineWidth = 2;
+  // body
+  g.beginPath();
+  g.rect(sx-85, sy-45, 170, 120);
+  g.fill();
+  // top roll
+  g.beginPath();
+  g.ellipse(sx, sy-45, 85, 20, 0, 0, Math.PI*2);
+  g.fill();
+  // bottom roll
+  g.beginPath();
+  g.ellipse(sx, sy+75, 85, 20, 0, 0, Math.PI*2);
+  g.fill();
+  // scroll text lines
+  g.globalAlpha = 0.055;
+  g.strokeStyle = PAPER;
+  g.lineWidth = 2.5;
+  for (let r = 0; r < 6; r++) {
+    g.beginPath();
+    g.moveTo(sx-62, sy-22 + r*19);
+    g.lineTo(sx+62, sy-22 + r*19);
+    g.stroke();
+  }
+  g.globalAlpha = 0.14;
+
+  /* ── Small quill pen (lower-left desk area) ───────────────────────── */
+  g.globalAlpha = 0.12;
+  g.strokeStyle = INK2;
+  g.lineWidth = 1.5;
+  const qx = 390, qy = 688;
+  g.beginPath();
+  g.moveTo(qx, qy);
+  g.bezierCurveTo(qx+40, qy-30, qx+90, qy-60, qx+120, qy-90);
+  g.bezierCurveTo(qx+115, qy-70, qx+100, qy-55, qx, qy);
+  g.stroke();
+  g.beginPath();
+  g.moveTo(qx+120, qy-90);
+  g.bezierCurveTo(qx+135, qy-120, qx+130, qy-140, qx+125, qy-150);
+  g.stroke();
+
+  g.restore();
+}
+
+/* ─── DRAW: desk surface ─────────────────────────────────────────────────── */
+function drawDesk() {
+  g.save();
+
+  // desk top face
+  g.beginPath();
+  g.moveTo(155, 695);
+  g.lineTo(1450, 695);
+  g.lineTo(1478, 718);
+  g.lineTo(127,  718);
+  g.closePath();
+  const dt = g.createLinearGradient(0, 695, 0, 718);
+  dt.addColorStop(0, '#3a1f08');
+  dt.addColorStop(1, '#251408');
+  g.fillStyle = dt;
+  g.fill();
+
+  // desk front face
+  g.beginPath();
+  g.rect(127, 718, 1351, H-718);
+  const df = g.createLinearGradient(0, 718, 0, H);
+  df.addColorStop(0, '#200e05');
+  df.addColorStop(1, '#110803');
+  g.fillStyle = df;
+  g.fill();
+
+  // wood grain on front face
+  g.strokeStyle = 'rgba(200,130,50,0.06)';
+  g.lineWidth = 0.8;
+  for (let i = 0; i < 30; i++) {
+    const wy = 720 + i * 7;
+    g.beginPath();
+    g.moveTo(127, wy + n1(i)*2);
+    g.bezierCurveTo(500, wy+n1(i+3)*2, 1000, wy+n1(i+7)*2, 1478, wy+n1(i+11)*2);
+    g.stroke();
+  }
+
+  // cross-hatch on desk top edge
+  g.beginPath();
+  g.moveTo(155, 695); g.lineTo(1450, 695); g.lineTo(1478, 718); g.lineTo(127, 718); g.closePath();
+  hatch(Math.PI*0.2, 5, 0.5, INK, 0.10);
+
+  // desk edge highlight
+  g.strokeStyle = 'rgba(200,150,70,0.18)';
+  g.lineWidth = 1.2;
+  g.beginPath();
+  g.moveTo(127, 718); g.lineTo(1478, 718);
+  g.stroke();
+
+  g.restore();
+}
+
+/* ─── DRAW: open book ────────────────────────────────────────────────────── */
+function drawBook(pageFlutter) {
+  g.save();
+  const bx = 680, by = 660;
+  const pf = pageFlutter;
+
+  /* left page */
+  function leftPage() {
+    g.moveTo(bx-165, by);
+    g.bezierCurveTo(bx-160, by-58, bx-55,  by-82, bx,     by-78);
+    g.lineTo(bx, by+62);
+    g.bezierCurveTo(bx-58,  by+68, bx-158, by+52, bx-165, by);
+    g.closePath();
+  }
+  g.beginPath(); leftPage();
+  g.fillStyle = '#f2e2b8'; g.fill();
+  g.beginPath(); leftPage();
+  hatch(0,             7.5, 0.55, INK2, 0.18);
+  g.beginPath(); leftPage();
+  hatch(Math.PI*0.5,  18,   0.4,  INK2, 0.06);
+
+  // left page text lines
+  g.strokeStyle = INK2; g.lineWidth = 0.7; g.globalAlpha = 0.22;
+  for (let r = 0; r < 9; r++) {
+    const ly = by - 55 + r * 13;
+    const lx0 = bx - 140 + Math.abs(r-4)*2;
+    const lx1 = bx - 22  + Math.abs(r-4)*1;
+    g.beginPath(); g.moveTo(lx0, ly); g.lineTo(lx1, ly); g.stroke();
+  }
+  // small illustration on left page (compass rose style)
+  g.globalAlpha = 0.3;
+  g.strokeStyle = INK2; g.lineWidth = 0.8;
+  const ilx = bx-90, ily = by+25;
+  g.beginPath(); g.arc(ilx, ily, 16, 0, Math.PI*2); g.stroke();
+  g.beginPath(); g.moveTo(ilx, ily-16); g.lineTo(ilx, ily+16); g.stroke();
+  g.beginPath(); g.moveTo(ilx-16, ily); g.lineTo(ilx+16, ily); g.stroke();
+  g.beginPath(); g.moveTo(ilx-11, ily-11); g.lineTo(ilx+11, ily+11); g.stroke();
+  g.beginPath(); g.moveTo(ilx+11, ily-11); g.lineTo(ilx-11, ily+11); g.stroke();
+  g.globalAlpha = 1;
+
+  /* right page (gently fluttering) */
+  g.save();
+  g.translate(bx, by-6);
+  g.rotate(pf);
+
+  function rightPage() {
+    g.moveTo(0,   68);
+    g.bezierCurveTo(52,  74, 158,  56, 165,   0);
+    g.bezierCurveTo(160, -54, 55, -74,  0,  -68);
+    g.closePath();
+  }
+  g.beginPath(); rightPage();
+  g.fillStyle = '#f8efd2'; g.fill();
+  g.beginPath(); rightPage();
+  hatch(0,            7.5, 0.55, INK2, 0.16);
+  g.beginPath(); rightPage();
+  hatch(Math.PI*0.5, 18,   0.4,  INK2, 0.05);
+
+  // right page text lines
+  g.strokeStyle = INK2; g.lineWidth = 0.7; g.globalAlpha = 0.20;
+  for (let r = 0; r < 9; r++) {
+    const ly = -52 + r * 13;
+    const lx0 = 20  + Math.abs(r-4)*1;
+    const lx1 = 148 - Math.abs(r-4)*2;
+    g.beginPath(); g.moveTo(lx0, ly); g.lineTo(lx1, ly); g.stroke();
+  }
+  // decorative engraving on right page
+  g.globalAlpha = 0.28;
+  g.strokeStyle = INK2; g.lineWidth = 0.9;
+  const ex = 85, ey = 22;
+  g.beginPath(); g.arc(ex, ey, 22, 0, Math.PI*2); g.stroke();
+  g.beginPath(); g.arc(ex, ey, 14, 0, Math.PI*2); g.stroke();
+  // star burst
+  for (let s = 0; s < 8; s++) {
+    const a = s * Math.PI / 4;
+    g.beginPath();
+    g.moveTo(ex + Math.cos(a)*8,  ey + Math.sin(a)*8);
+    g.lineTo(ex + Math.cos(a)*22, ey + Math.sin(a)*22);
+    g.stroke();
+  }
+  g.globalAlpha = 1;
+
+  // right-page outline
+  g.beginPath(); rightPage();
+  g.strokeStyle = INK2; g.lineWidth = 1.6; g.stroke();
+
+  // fluttering page corner lift (very top-right corner)
+  if (pf > 0.005) {
+    g.save();
+    g.globalAlpha = 0.35;
+    g.fillStyle = '#ece0c0';
+    g.beginPath();
+    g.moveTo(155, -5);
+    g.bezierCurveTo(165, -25, 172, -40, 155, -55);
+    g.bezierCurveTo(145, -42, 143, -20, 145, -5);
+    g.closePath();
+    g.fill();
+    g.strokeStyle = INK2; g.lineWidth = 0.8; g.stroke();
+    g.restore();
+  }
+  g.restore();
+
+  /* left-page outline */
+  g.beginPath(); leftPage();
+  g.strokeStyle = INK2; g.lineWidth = 1.6; g.stroke();
+
+  /* spine */
+  const spG = g.createLinearGradient(bx-9, 0, bx+9, 0);
+  spG.addColorStop(0,   '#4a2010');
+  spG.addColorStop(0.4, '#7a3818');
+  spG.addColorStop(1,   '#3a1808');
+  g.fillStyle = spG;
+  g.beginPath();
+  g.moveTo(bx-9, by-82); g.lineTo(bx+9, by-82);
+  g.lineTo(bx+9, by+66); g.lineTo(bx-9, by+66);
+  g.closePath();
+  g.fill();
+
+  // page-stack edges (left)
+  g.strokeStyle = PAPER2; g.lineWidth = 0.35; g.globalAlpha = 0.35;
+  for (let e = 0; e < 12; e++) {
+    const f = e / 12;
+    g.beginPath();
+    g.moveTo(bx - lerp(9, 165, f), by + lerp(-82, -10, f*0.5));
+    g.lineTo(bx - lerp(9, 165, f), by + lerp(66,  20, f*0.5));
+    g.stroke();
+  }
+  g.globalAlpha = 1;
+
+  g.restore();
+}
+
+/* ─── DRAW: candle ───────────────────────────────────────────────────────── */
+function drawCandle() {
+  const cx = 1105, cy = 678;
+  const flick = Math.sin(t*8.13)*0.04 + Math.sin(t*14.27)*0.03 + Math.sin(t*22.9)*0.015;
+
+  g.save();
+
+  // saucer / holder
+  g.fillStyle = '#7a5020';
+  g.strokeStyle = INK;
+  g.lineWidth = 1.5;
+  g.beginPath();
+  g.ellipse(cx, cy+6, 40, 12, 0, 0, Math.PI*2);
+  g.fill(); g.stroke();
+  g.beginPath();
+  g.ellipse(cx, cy+3, 32, 9, 0, 0, Math.PI*2);
+  g.fillStyle = '#9a6830';
+  g.fill(); g.stroke();
+
+  // candle body
+  const cg = g.createLinearGradient(cx-18, 0, cx+18, 0);
+  cg.addColorStop(0,   '#c8b070');
+  cg.addColorStop(0.25,'#eedaa0');
+  cg.addColorStop(0.55,'#e8d090');
+  cg.addColorStop(0.8, '#d4bc78');
+  cg.addColorStop(1,   '#b89050');
+  g.fillStyle = cg;
+  g.strokeStyle = INK;
+  g.lineWidth = 1.5;
+  g.beginPath();
+  g.moveTo(cx-18, cy+3);
+  g.bezierCurveTo(cx-20, cy-60, cx-18, cy-150, cx-16, cy-200);
+  g.lineTo(cx+16, cy-200);
+  g.bezierCurveTo(cx+18, cy-150, cx+20, cy-60, cx+18, cy+3);
+  g.closePath();
+  g.fill(); g.stroke();
+
+  // wax drip
+  g.fillStyle = '#d4c080';
+  g.beginPath();
+  g.moveTo(cx-10, cy-198);
+  g.bezierCurveTo(cx-13, cy-175, cx-18, cy-158, cx-18, cy-140);
+  g.lineTo(cx-11, cy-140);
+  g.bezierCurveTo(cx-11, cy-158, cx-8, cy-175, cx-8, cy-198);
+  g.closePath();
+  g.fill();
+  g.beginPath();
+  g.moveTo(cx+6, cy-198);
+  g.bezierCurveTo(cx+10, cy-180, cx+16, cy-166, cx+16, cy-155);
+  g.lineTo(cx+10, cy-155);
+  g.bezierCurveTo(cx+10, cy-168, cx+6, cy-182, cx+4, cy-198);
+  g.closePath();
+  g.fill();
+
+  // candle horizontal rings (texture)
+  g.strokeStyle = 'rgba(80,50,10,0.18)';
+  g.lineWidth = 0.7;
+  for (let r = 0; r < 8; r++) {
+    const ry = cy - 30 - r * 22;
+    g.beginPath();
+    g.moveTo(cx-18, ry);
+    g.bezierCurveTo(cx-22, ry+1, cx+22, ry+1, cx+18, ry);
+    g.stroke();
+  }
+
+  // wick
+  g.strokeStyle = '#1e0e06';
+  g.lineWidth = 1.8;
+  g.beginPath();
+  g.moveTo(cx, cy-200);
+  g.bezierCurveTo(cx+2, cy-210, cx+3, cy-218, cx+1, cy-225);
+  g.stroke();
+
+  // flame
+  const fh = 42 + flick * 25;
+  const fw = 14 + flick * 8;
+  g.save();
+  g.translate(cx + 1, cy - 226);
+
+  // outer glow
+  const fgOuter = g.createRadialGradient(0, -fh*0.4, 0, 0, -fh*0.3, fh*1.2);
+  fgOuter.addColorStop(0,   'rgba(255,240,150,0.95)');
+  fgOuter.addColorStop(0.25,'rgba(255,170, 40,0.80)');
+  fgOuter.addColorStop(0.6, 'rgba(220, 90, 10,0.50)');
+  fgOuter.addColorStop(1,   'rgba(170, 50,  0,0)');
+  g.fillStyle = fgOuter;
+  g.beginPath();
+  g.moveTo(0, 2);
+  g.bezierCurveTo(-fw + flick*8, -fh*0.28, -fw*0.6, -fh*0.75, flick*4, -fh);
+  g.bezierCurveTo(fw*0.6, -fh*0.75, fw - flick*8, -fh*0.28, 0, 2);
+  g.fill();
+
+  // inner core
+  const fgInner = g.createRadialGradient(flick*2, -fh*0.55, 0, flick, -fh*0.4, fh*0.5);
+  fgInner.addColorStop(0,   'rgba(255,255,230,1)');
+  fgInner.addColorStop(0.4, 'rgba(255,230,120,0.9)');
+  fgInner.addColorStop(1,   'rgba(255,180, 40,0)');
+  g.fillStyle = fgInner;
+  g.beginPath();
+  g.moveTo(0, 0);
+  g.bezierCurveTo(-fw*0.5 + flick*3, -fh*0.22, -fw*0.3, -fh*0.65, flick*2, -fh*0.82);
+  g.bezierCurveTo(fw*0.3, -fh*0.65, fw*0.5 - flick*3, -fh*0.22, 0, 0);
+  g.fill();
+
+  g.restore();
+  g.restore();
+}
+
+/* ─── DRAW: cat character ────────────────────────────────────────────────── */
+function drawCat(glassesLift) {
+  const cx  = 725;
+  const bodyY = 572;
+  const headY = 392;
+  const breathe = Math.sin(t * 0.82) * 2.8;
+
+  // tail sway
+  const tSway = Math.sin(t*1.08)*0.32 + Math.sin(t*0.67)*0.16;
+
+  g.save();
+
+  /* ── TAIL (drawn behind body) ─────────────────────────────────────── */
+  const tsX = cx + 88, tsY = bodyY + 72;
+  const tcX = tsX + 105 + tSway * 85;
+  const tcY = tsY - 35 + tSway * 20;
+  const teX = tsX + 210 + tSway * 70;
+  const teY = tsY - 145 + tSway * 45;
+
+  // tail thick base
+  g.strokeStyle = INK;
+  g.lineWidth = 22;
+  g.lineCap = 'round';
+  g.globalAlpha = 0.88;
+  g.beginPath();
+  g.moveTo(tsX, tsY);
+  g.quadraticCurveTo(tcX, tcY, teX, teY);
+  g.stroke();
+
+  // lighter inner stripe
+  g.strokeStyle = PAPER2;
+  g.lineWidth = 10;
+  g.globalAlpha = 0.32;
+  g.beginPath();
+  g.moveTo(tsX, tsY);
+  g.quadraticCurveTo(tcX, tcY, teX, teY);
+  g.stroke();
+
+  // tail hatch stripes (tabby)
+  g.strokeStyle = INK;
+  g.lineWidth = 1.4;
+  g.globalAlpha = 0.65;
+  for (let i = 0.08; i < 0.92; i += 0.13) {
+    const bxT  = lerp(lerp(tsX,tcX,i), lerp(tcX,teX,i), i);
+    const byT  = lerp(lerp(tsY,tcY,i), lerp(tcY,teY,i), i);
+    const dxT  = lerp(tcX-tsX, teX-tcX, i);
+    const dyT  = lerp(tcY-tsY, teY-tcY, i);
+    const lenT = Math.hypot(dxT, dyT);
+    const nx = -dyT/lenT * 13, ny = dxT/lenT * 13;
+    g.beginPath();
+    g.moveTo(bxT-nx, byT-ny);
+    g.lineTo(bxT+nx, byT+ny);
+    g.stroke();
+  }
+  g.globalAlpha = 1;
+  g.lineCap = 'butt';
+
+  /* ── BODY ─────────────────────────────────────────────────────────── */
+  function bodyPath() {
+    g.ellipse(cx, bodyY + breathe, 118, 132, 0, 0, Math.PI*2);
+  }
+  g.beginPath(); bodyPath();
+  g.fillStyle = PAPER; g.fill();
+  g.beginPath(); bodyPath();
+  hatch(Math.PI*0.25, 6,  0.65, INK, 0.10);
+  g.beginPath(); bodyPath();
+  hatch(Math.PI*0.78, 9,  0.60, INK, 0.06);
+  g.beginPath(); bodyPath();
+  g.strokeStyle = INK; g.lineWidth = 2.2; g.stroke();
+
+  // chest/robe fur strands
+  g.strokeStyle = INK2; g.lineWidth = 0.9; g.globalAlpha = 0.45;
+  for (let i = -3; i <= 3; i++) {
+    g.beginPath();
+    g.moveTo(cx+i*11, bodyY - 112 + breathe);
+    g.bezierCurveTo(cx+i*14, bodyY - 55 + breathe, cx+i*14, bodyY + 30 + breathe, cx+i*11, bodyY + 110 + breathe);
+    g.stroke();
+  }
+  g.globalAlpha = 1;
+
+  /* ── LEFT ARM (resting on book) ───────────────────────────────────── */
+  function lArmPath() {
+    g.moveTo(cx - 98, bodyY - 22 + breathe);
+    g.bezierCurveTo(cx-135, bodyY + 35 + breathe, cx-148, bodyY + 92 + breathe, cx-128, bodyY + 128 + breathe);
+    g.bezierCurveTo(cx-108, bodyY + 148 + breathe, cx- 62, bodyY + 152 + breathe, cx- 42, bodyY + 136 + breathe);
+    g.bezierCurveTo(cx- 30, bodyY + 124 + breathe, cx- 22, bodyY + 102 + breathe, cx- 42, bodyY +  88 + breathe);
+    g.bezierCurveTo(cx- 65, bodyY +  72 + breathe, cx- 80, bodyY +  50 + breathe, cx- 68, bodyY - 18 + breathe);
+    g.closePath();
+  }
+  g.beginPath(); lArmPath();
+  g.fillStyle = PAPER; g.fill();
+  g.beginPath(); lArmPath();
+  hatch(Math.PI*0.3, 5.5, 0.55, INK, 0.13);
+  g.beginPath(); lArmPath();
+  g.strokeStyle = INK; g.lineWidth = 1.8; g.stroke();
+
+  // left paw
+  const lpX = cx-82, lpY = bodyY + 152 + breathe;
+  function lPawPath() { g.ellipse(lpX, lpY, 32, 20, -0.25, 0, Math.PI*2); }
+  g.beginPath(); lPawPath();
+  g.fillStyle = PAPER; g.fill();
+  g.beginPath(); lPawPath();
+  hatch(Math.PI*0.2, 5, 0.5, INK, 0.12);
+  g.beginPath(); lPawPath();
+  g.strokeStyle = INK; g.lineWidth = 1.5; g.stroke();
+  // toes
+  for (let i = -1; i <= 1; i++) {
+    g.beginPath(); g.arc(lpX + i*11, lpY - 9, 7, Math.PI*1.1, Math.PI*0, false);
+    g.fillStyle = PAPER; g.fill();
+    g.strokeStyle = INK; g.lineWidth = 1.2; g.stroke();
+  }
+
+  /* ── RIGHT ARM (sometimes raised to push glasses) ─────────────────── */
+  const armLift = glassesLift * 148;
+  function rArmPath() {
+    g.moveTo(cx + 93, bodyY - 26 + breathe);
+    g.bezierCurveTo(cx+132, bodyY + 18 - armLift*0.28 + breathe, cx+152, bodyY + 58 - armLift*0.52 + breathe, cx+132, bodyY + 100 - armLift + breathe);
+    g.bezierCurveTo(cx+115, bodyY + 134 - armLift + breathe, cx+ 74, bodyY + 145 - armLift + breathe, cx+ 54, bodyY + 124 - armLift + breathe);
+    g.bezierCurveTo(cx+ 44, bodyY + 108 - armLift + breathe, cx+ 55, bodyY +  82 - armLift + breathe, cx+ 70, bodyY +  60 - armLift + breathe);
+    g.bezierCurveTo(cx+ 86, bodyY +  38 - armLift + breathe, cx+ 78, bodyY -  10 + breathe, cx+ 68, bodyY - 22 + breathe);
+    g.closePath();
+  }
+  g.beginPath(); rArmPath();
+  g.fillStyle = PAPER; g.fill();
+  g.beginPath(); rArmPath();
+  hatch(Math.PI*0.7, 5.5, 0.55, INK, 0.13);
+  g.beginPath(); rArmPath();
+  g.strokeStyle = INK; g.lineWidth = 1.8; g.stroke();
+
+  // right paw
+  const rpX = cx+92, rpY = bodyY + 148 - armLift + breathe;
+  function rPawPath() { g.ellipse(rpX, rpY, 32, 20, 0.25, 0, Math.PI*2); }
+  g.beginPath(); rPawPath();
+  g.fillStyle = PAPER; g.fill();
+  g.beginPath(); rPawPath();
+  hatch(Math.PI*0.8, 5, 0.5, INK, 0.12);
+  g.beginPath(); rPawPath();
+  g.strokeStyle = INK; g.lineWidth = 1.5; g.stroke();
+  for (let i = -1; i <= 1; i++) {
+    g.beginPath(); g.arc(rpX + i*11, rpY - 9, 7, Math.PI*1.0, Math.PI*0, false);
+    g.fillStyle = PAPER; g.fill();
+    g.strokeStyle = INK; g.lineWidth = 1.2; g.stroke();
+  }
+
+  /* ── NECK ─────────────────────────────────────────────────────────── */
+  g.fillStyle = PAPER; g.strokeStyle = INK; g.lineWidth = 1.5;
+  g.beginPath();
+  g.moveTo(cx - 24, headY + 82);
+  g.lineTo(cx - 28, bodyY - 118 + breathe);
+  g.lineTo(cx + 28, bodyY - 118 + breathe);
+  g.lineTo(cx + 24, headY + 82);
+  g.closePath();
+  g.fill(); g.stroke();
+
+  /* ── HEAD ─────────────────────────────────────────────────────────── */
+  const hx = cx, hy = headY;
+
+  function headPath() { g.ellipse(hx, hy+6, 90, 84, 0.08, 0, Math.PI*2); }
+  g.beginPath(); headPath();
+  g.fillStyle = PAPER; g.fill();
+  g.beginPath(); headPath();
+  hatch(Math.PI*0.22, 5.5, 0.60, INK, 0.095);
+  g.beginPath(); headPath();
+  hatch(Math.PI*0.77, 8,   0.55, INK, 0.055);
+  g.beginPath(); headPath();
+  g.strokeStyle = INK; g.lineWidth = 2.2; g.stroke();
+
+  /* ── EARS ─────────────────────────────────────────────────────────── */
+  // left ear
+  g.fillStyle = PAPER; g.strokeStyle = INK; g.lineWidth = 1.9;
+  g.beginPath();
+  g.moveTo(hx-62, hy-38); g.lineTo(hx-88, hy-118); g.lineTo(hx-22, hy-58); g.closePath();
+  g.fill(); g.stroke();
+  g.fillStyle = '#e09085';
+  g.beginPath();
+  g.moveTo(hx-64, hy-48); g.lineTo(hx-82, hy-105); g.lineTo(hx-30, hy-65); g.closePath();
+  g.fill();
+
+  // right ear
+  g.fillStyle = PAPER; g.strokeStyle = INK; g.lineWidth = 1.9;
+  g.beginPath();
+  g.moveTo(hx+57, hy-42); g.lineTo(hx+85, hy-120); g.lineTo(hx+20, hy-62); g.closePath();
+  g.fill(); g.stroke();
+  g.fillStyle = '#e09085';
+  g.beginPath();
+  g.moveTo(hx+58, hy-52); g.lineTo(hx+76, hy-107); g.lineTo(hx+26, hy-68); g.closePath();
+  g.fill();
+
+  /* ── EYES (looking downward) ──────────────────────────────────────── */
+  const eyeY = hy + 8;
+  // left eye socket
+  g.fillStyle = '#1c0a04';
+  g.beginPath(); g.ellipse(hx-30, eyeY, 13, 9, 0.12, 0, Math.PI*2); g.fill();
+  g.beginPath(); g.ellipse(hx-30, eyeY, 17, 11, 0.12, 0, Math.PI*2);
+  g.strokeStyle = INK; g.lineWidth = 1.6; g.stroke();
+  // pupil slit (reading intently)
+  g.fillStyle = '#0e0502';
+  g.beginPath(); g.ellipse(hx-30, eyeY+1, 4, 8, 0, 0, Math.PI*2); g.fill();
+  // gleam
+  g.fillStyle = 'rgba(255,240,200,0.75)';
+  g.beginPath(); g.arc(hx-26, eyeY-3, 3.5, 0, Math.PI*2); g.fill();
+
+  // right eye socket
+  g.fillStyle = '#1c0a04';
+  g.beginPath(); g.ellipse(hx+30, eyeY, 13, 9, -0.12, 0, Math.PI*2); g.fill();
+  g.beginPath(); g.ellipse(hx+30, eyeY, 17, 11, -0.12, 0, Math.PI*2);
+  g.strokeStyle = INK; g.lineWidth = 1.6; g.stroke();
+  g.fillStyle = '#0e0502';
+  g.beginPath(); g.ellipse(hx+30, eyeY+1, 4, 8, 0, 0, Math.PI*2); g.fill();
+  g.fillStyle = 'rgba(255,240,200,0.75)';
+  g.beginPath(); g.arc(hx+34, eyeY-3, 3.5, 0, Math.PI*2); g.fill();
+
+  /* ── SPECTACLES ────────────────────────────────────────────────────── */
+  // lens rims
+  g.strokeStyle = INK2; g.lineWidth = 2.2; g.globalAlpha = 0.9;
+  g.beginPath(); g.arc(hx-30, eyeY+3, 21, 0, Math.PI*2); g.stroke();
+  g.beginPath(); g.arc(hx+30, eyeY+3, 21, 0, Math.PI*2); g.stroke();
+  // lens glare
+  g.strokeStyle = 'rgba(255,240,200,0.18)'; g.lineWidth = 1;
+  g.beginPath(); g.arc(hx-30, eyeY+3, 18, -Math.PI*0.85, -Math.PI*0.4); g.stroke();
+  g.beginPath(); g.arc(hx+30, eyeY+3, 18, -Math.PI*0.85, -Math.PI*0.4); g.stroke();
+  // bridge
+  g.strokeStyle = INK2; g.lineWidth = 2;
+  g.beginPath(); g.moveTo(hx-9, eyeY+4); g.lineTo(hx+9, eyeY+4); g.stroke();
+  // arms
+  g.beginPath(); g.moveTo(hx-51, eyeY+3); g.bezierCurveTo(hx-68, eyeY, hx-80, eyeY-6, hx-82, eyeY-10); g.stroke();
+  g.beginPath(); g.moveTo(hx+51, eyeY+3); g.bezierCurveTo(hx+68, eyeY, hx+80, eyeY-6, hx+82, eyeY-10); g.stroke();
+  g.globalAlpha = 1;
+
+  /* ── NOSE ─────────────────────────────────────────────────────────── */
+  g.fillStyle = '#8a3828';
+  g.beginPath();
+  g.moveTo(hx, hy+27); g.lineTo(hx-8, hy+34); g.lineTo(hx+8, hy+34); g.closePath();
+  g.fill();
+  g.strokeStyle = INK; g.lineWidth = 1; g.stroke();
+
+  /* ── PHILTRUM & MOUTH ─────────────────────────────────────────────── */
+  g.strokeStyle = INK; g.lineWidth = 1.1;
+  g.beginPath(); g.moveTo(hx, hy+34); g.lineTo(hx, hy+44); g.stroke();
+  g.beginPath();
+  g.moveTo(hx-14, hy+46);
+  g.bezierCurveTo(hx-8, hy+52, hx+8, hy+52, hx+14, hy+46);
+  g.stroke();
+
+  /* ── WHISKERS ─────────────────────────────────────────────────────── */
+  g.strokeStyle = INK; g.lineWidth = 0.85; g.globalAlpha = 0.62;
+  for (let i = 0; i < 3; i++) {
+    const wy = hy + 32 + (i-1)*7;
+    g.beginPath(); g.moveTo(hx-12, wy); g.lineTo(hx-92, wy + (i-1)*6); g.stroke();
+  }
+  for (let i = 0; i < 3; i++) {
+    const wy = hy + 32 + (i-1)*7;
+    g.beginPath(); g.moveTo(hx+12, wy); g.lineTo(hx+92, wy + (i-1)*6); g.stroke();
+  }
+  g.globalAlpha = 1;
+
+  /* ── FUR DETAIL LINES (forehead, cheeks) ──────────────────────────── */
+  g.strokeStyle = INK2; g.lineWidth = 0.7; g.globalAlpha = 0.32;
+  // forehead M stripe
+  g.beginPath(); g.moveTo(hx-8, hy-48); g.lineTo(hx-5, hy-25); g.stroke();
+  g.beginPath(); g.moveTo(hx,   hy-52); g.lineTo(hx,   hy-28); g.stroke();
+  g.beginPath(); g.moveTo(hx+8, hy-48); g.lineTo(hx+5, hy-25); g.stroke();
+  // cheek fur tufts
+  g.beginPath(); g.moveTo(hx-72, hy+15); g.bezierCurveTo(hx-58, hy+18, hx-50, hy+10, hx-52, hy-2); g.stroke();
+  g.beginPath(); g.moveTo(hx+72, hy+15); g.bezierCurveTo(hx+58, hy+18, hx+50, hy+10, hx+52, hy-2); g.stroke();
+  g.globalAlpha = 1;
+
+  g.restore();
+}
+
+/* ─── DRAW: paper grain overlay ──────────────────────────────────────────── */
+function drawGrainOverlay() {
+  const pat = g.createPattern(gC, 'repeat');
+  if (!pat) return;
+  g.save();
+  g.globalAlpha = 0.22;
+  g.fillStyle = pat;
+  g.fillRect(0, 0, W, H);
+  g.restore();
+}
+
+/* ─── DRAW: cinematic vignette ───────────────────────────────────────────── */
+function drawVignette() {
+  const rg = g.createRadialGradient(W*0.5, H*0.5, H*0.22, W*0.5, H*0.5, H*0.9);
+  rg.addColorStop(0,    'rgba(0,0,0,0)');
+  rg.addColorStop(0.55, 'rgba(12,5,1,0)');
+  rg.addColorStop(0.80, 'rgba(12,5,1,0.38)');
+  rg.addColorStop(1,    'rgba(6,2,0,0.88)');
+  g.fillStyle = rg;
+  g.fillRect(0, 0, W, H);
+}
+
+/* ─── DRAW: title / caption ──────────────────────────────────────────────── */
+function drawCaption() {
+  g.save();
+  g.globalAlpha = 0.55;
+  g.fillStyle = PAPER2;
+  g.font = 'italic 18px Georgia, serif';
+  g.textAlign = 'center';
+  g.fillText('博学猫  ·  Scholar Cat  ·  Felis Eruditissimus', W/2, H - 28);
+  g.globalAlpha = 0.20;
+  g.strokeStyle = PAPER2;
+  g.lineWidth = 0.8;
+  // decorative rule line
+  g.beginPath(); g.moveTo(W/2-220, H-42); g.lineTo(W/2+220, H-42); g.stroke();
+  g.restore();
+}
+
+/* ─── DRAW: decorative border / frame ───────────────────────────────────── */
+function drawFrame() {
+  g.save();
+  const m = 18;
+  g.strokeStyle = 'rgba(120,75,28,0.28)';
+  g.lineWidth = 1.2;
+  g.strokeRect(m, m, W-m*2, H-m*2);
+  g.strokeStyle = 'rgba(120,75,28,0.14)';
+  g.lineWidth = 0.6;
+  g.strokeRect(m+5, m+5, W-m*2-10, H-m*2-10);
+
+  // corner ornaments
+  const co = [
+    [m+2, m+2], [W-m-2, m+2], [m+2, H-m-2], [W-m-2, H-m-2]
+  ];
+  g.strokeStyle = 'rgba(120,75,28,0.35)';
+  g.lineWidth = 1;
+  co.forEach(([ox, oy]) => {
+    const sx = ox < W/2 ? 1 : -1;
+    const sy = oy < H/2 ? 1 : -1;
+    g.beginPath();
+    g.moveTo(ox + sx*20, oy);
+    g.lineTo(ox, oy); g.lineTo(ox, oy + sy*20);
+    g.stroke();
+    g.beginPath();
+    g.arc(ox + sx*4, oy + sy*4, 3, 0, Math.PI*2);
+    g.stroke();
+  });
+  g.restore();
+}
+
+/* ─── animation loop ─────────────────────────────────────────────────────── */
+let lastT = 0;
+function frame(ts) {
+  t = ts * 0.001;
+  const dt = t - lastT;
+  lastT = t;
+
+  // resolve glasses animation
+  let glassesLift = 0;
+  if (t >= nextGlasses) {
+    const gElapsed = t - nextGlasses;
+    const dur = 1.8;
+    if (gElapsed < dur) {
+      const p = gElapsed / dur;
+      if (p < 0.28) {
+        glassesLift = easeInOut(p / 0.28);
+      } else if (p < 0.62) {
+        glassesLift = 1;
+      } else {
+        glassesLift = easeInOut(1 - (p - 0.62) / 0.38);
+      }
+    } else {
+      nextGlasses = t + 5.5 + Math.random() * 4.5;
+      glassesLift = 0;
+    }
+  }
+
+  // page flutter (gentle continuous)
+  const pageFlutter = Math.sin(t * 2.05) * 0.025 + Math.sin(t * 3.47) * 0.012;
+
+  // render scene back-to-front
+  drawBg();
+  drawArtifacts();
+  drawCandleGlow();
+  drawDesk();
+  drawBook(pageFlutter);
+  drawCat(glassesLift);
+  drawCandle();
+  drawGrainOverlay();
+  drawVignette();
+  drawFrame();
+  drawCaption();
+
+  requestAnimationFrame(frame);
+}
+requestAnimationFrame(frame);
+</script>
+</body>
+</html>
