@@ -325,98 +325,131 @@ function drawDesk() {
 /* ─── DRAW: open book ────────────────────────────────────────────────────── */
 function drawBook(pageFlutter) {
   g.save();
-  const bx = 680, by = 660;
+  // Book is wider and positioned clearly on desk, cat sits slightly behind/right
+  const bx = 600, by = 672;
   const pf = pageFlutter;
+  const W_PAGE = 185;  // half page width
 
-  /* left page */
-  function leftPage() {
-    g.moveTo(bx-165, by);
-    g.bezierCurveTo(bx-160, by-58, bx-55,  by-82, bx,     by-78);
-    g.lineTo(bx, by+62);
-    g.bezierCurveTo(bx-58,  by+68, bx-158, by+52, bx-165, by);
-    g.closePath();
-  }
-  g.beginPath(); leftPage();
-  g.fillStyle = '#f2e2b8'; g.fill();
-  g.beginPath(); leftPage();
-  hatch(0,             7.5, 0.55, INK2, 0.18);
-  g.beginPath(); leftPage();
-  hatch(Math.PI*0.5,  18,   0.4,  INK2, 0.06);
+  /* ── book shadow on desk ───── */
+  g.fillStyle = 'rgba(20,8,2,0.22)';
+  g.beginPath();
+  g.ellipse(bx, by + 55, W_PAGE*1.1, 16, 0, 0, Math.PI*2);
+  g.fill();
 
-  // left page text lines
-  g.strokeStyle = INK2; g.lineWidth = 0.7; g.globalAlpha = 0.22;
-  for (let r = 0; r < 9; r++) {
-    const ly = by - 55 + r * 13;
-    const lx0 = bx - 140 + Math.abs(r-4)*2;
-    const lx1 = bx - 22  + Math.abs(r-4)*1;
-    g.beginPath(); g.moveTo(lx0, ly); g.lineTo(lx1, ly); g.stroke();
-  }
-  // small illustration on left page (compass rose style)
-  g.globalAlpha = 0.3;
-  g.strokeStyle = INK2; g.lineWidth = 0.8;
-  const ilx = bx-90, ily = by+25;
-  g.beginPath(); g.arc(ilx, ily, 16, 0, Math.PI*2); g.stroke();
-  g.beginPath(); g.moveTo(ilx, ily-16); g.lineTo(ilx, ily+16); g.stroke();
-  g.beginPath(); g.moveTo(ilx-16, ily); g.lineTo(ilx+16, ily); g.stroke();
-  g.beginPath(); g.moveTo(ilx-11, ily-11); g.lineTo(ilx+11, ily+11); g.stroke();
-  g.beginPath(); g.moveTo(ilx+11, ily-11); g.lineTo(ilx-11, ily+11); g.stroke();
+  /* ── hard book cover (visible below pages) ─── */
+  const covG = g.createLinearGradient(bx - W_PAGE - 8, 0, bx - W_PAGE + 25, 0);
+  covG.addColorStop(0,   '#3a1808');
+  covG.addColorStop(0.4, '#6a2e12');
+  covG.addColorStop(1,   '#4a1e0a');
+  g.fillStyle = covG;
+  g.beginPath();
+  g.moveTo(bx - W_PAGE - 8, by - 92);
+  g.lineTo(bx - W_PAGE - 8, by + 55);
+  g.bezierCurveTo(bx - W_PAGE, by + 62, bx - 20, by + 68, bx, by + 64);
+  g.lineTo(bx, by - 85);
+  g.bezierCurveTo(bx - 30, by - 92, bx - W_PAGE, by - 98, bx - W_PAGE - 8, by - 92);
+  g.closePath();
+  g.fill();
+  // decorative cover border
+  g.strokeStyle = '#8a4020'; g.lineWidth = 1; g.globalAlpha = 0.5;
+  g.beginPath();
+  g.moveTo(bx - W_PAGE + 8, by - 84);
+  g.lineTo(bx - W_PAGE + 8, by + 48);
+  g.stroke();
   g.globalAlpha = 1;
 
-  /* right page (gently fluttering) */
-  g.save();
-  g.translate(bx, by-6);
-  g.rotate(pf);
-
-  function rightPage() {
-    g.moveTo(0,   68);
-    g.bezierCurveTo(52,  74, 158,  56, 165,   0);
-    g.bezierCurveTo(160, -54, 55, -74,  0,  -68);
+  /* ── left page ──────────────────────────────────────────────────────── */
+  function leftPage() {
+    g.moveTo(bx - W_PAGE,  by + 4);
+    g.bezierCurveTo(bx - W_PAGE + 2, by - 68,  bx - 62, by - 88,  bx,     by - 84);
+    g.lineTo(bx, by + 60);
+    g.bezierCurveTo(bx - 65,  by + 66,  bx - W_PAGE + 2, by + 58,  bx - W_PAGE, by + 4);
     g.closePath();
   }
-  g.beginPath(); rightPage();
-  g.fillStyle = '#f8efd2'; g.fill();
-  g.beginPath(); rightPage();
-  hatch(0,            7.5, 0.55, INK2, 0.16);
-  g.beginPath(); rightPage();
-  hatch(Math.PI*0.5, 18,   0.4,  INK2, 0.05);
+  g.beginPath(); leftPage();
+  g.fillStyle = '#eeddb0'; g.fill();
+  g.beginPath(); leftPage();
+  hatch(0,            8,   0.55, INK2, 0.16);
+  g.beginPath(); leftPage();
+  hatch(Math.PI*0.5, 22,   0.4,  INK2, 0.05);
 
-  // right page text lines
-  g.strokeStyle = INK2; g.lineWidth = 0.7; g.globalAlpha = 0.20;
-  for (let r = 0; r < 9; r++) {
-    const ly = -52 + r * 13;
-    const lx0 = 20  + Math.abs(r-4)*1;
-    const lx1 = 148 - Math.abs(r-4)*2;
+  // left page text lines
+  g.strokeStyle = INK2; g.lineWidth = 0.75; g.globalAlpha = 0.28;
+  for (let r = 0; r < 10; r++) {
+    const ly  = by - 66 + r * 13;
+    const lx0 = bx - W_PAGE + 18 + Math.abs(r-5)*1.5;
+    const lx1 = bx - 22        - Math.abs(r-5)*1;
     g.beginPath(); g.moveTo(lx0, ly); g.lineTo(lx1, ly); g.stroke();
   }
-  // decorative engraving on right page
-  g.globalAlpha = 0.28;
+  // compass-rose illustration in lower-left
+  g.globalAlpha = 0.35;
   g.strokeStyle = INK2; g.lineWidth = 0.9;
-  const ex = 85, ey = 22;
-  g.beginPath(); g.arc(ex, ey, 22, 0, Math.PI*2); g.stroke();
-  g.beginPath(); g.arc(ex, ey, 14, 0, Math.PI*2); g.stroke();
-  // star burst
+  const ilx = bx - W_PAGE*0.55, ily = by + 28;
+  g.beginPath(); g.arc(ilx, ily, 18, 0, Math.PI*2); g.stroke();
+  g.beginPath(); g.arc(ilx, ily,  9, 0, Math.PI*2); g.stroke();
   for (let s = 0; s < 8; s++) {
     const a = s * Math.PI / 4;
     g.beginPath();
-    g.moveTo(ex + Math.cos(a)*8,  ey + Math.sin(a)*8);
-    g.lineTo(ex + Math.cos(a)*22, ey + Math.sin(a)*22);
+    g.moveTo(ilx + Math.cos(a)*9,  ily + Math.sin(a)*9);
+    g.lineTo(ilx + Math.cos(a)*18, ily + Math.sin(a)*18);
+    g.stroke();
+  }
+  g.globalAlpha = 1;
+
+  /* ── right page (gently fluttering) ──────────────────────────────── */
+  g.save();
+  g.translate(bx, by - 10);
+  g.rotate(pf);
+
+  function rightPage() {
+    g.moveTo(0,   70);
+    g.bezierCurveTo(58,  76,  W_PAGE + 8, 58,  W_PAGE + 12,  2);
+    g.bezierCurveTo(W_PAGE + 8, -56, 56, -76, 0, -70);
+    g.closePath();
+  }
+  g.beginPath(); rightPage();
+  g.fillStyle = '#f5ecd0'; g.fill();
+  g.beginPath(); rightPage();
+  hatch(0,            8,   0.55, INK2, 0.14);
+  g.beginPath(); rightPage();
+  hatch(Math.PI*0.5, 22,   0.4,  INK2, 0.05);
+
+  // right page text lines
+  g.strokeStyle = INK2; g.lineWidth = 0.75; g.globalAlpha = 0.25;
+  for (let r = 0; r < 10; r++) {
+    const ly  = -64 + r * 13;
+    const lx0 = 22             + Math.abs(r-5)*1;
+    const lx1 = W_PAGE - 12   - Math.abs(r-5)*1.5;
+    g.beginPath(); g.moveTo(lx0, ly); g.lineTo(lx1, ly); g.stroke();
+  }
+  // decorative medallion on right page
+  g.globalAlpha = 0.32;
+  g.strokeStyle = INK2; g.lineWidth = 1;
+  const ex = W_PAGE * 0.52, ey = 22;
+  g.beginPath(); g.arc(ex, ey, 24, 0, Math.PI*2); g.stroke();
+  g.beginPath(); g.arc(ex, ey, 15, 0, Math.PI*2); g.stroke();
+  for (let s = 0; s < 8; s++) {
+    const a = s * Math.PI / 4;
+    g.beginPath();
+    g.moveTo(ex + Math.cos(a)*9,  ey + Math.sin(a)*9);
+    g.lineTo(ex + Math.cos(a)*24, ey + Math.sin(a)*24);
     g.stroke();
   }
   g.globalAlpha = 1;
 
   // right-page outline
   g.beginPath(); rightPage();
-  g.strokeStyle = INK2; g.lineWidth = 1.6; g.stroke();
+  g.strokeStyle = INK2; g.lineWidth = 1.7; g.stroke();
 
-  // fluttering page corner lift (very top-right corner)
-  if (pf > 0.005) {
+  // page-corner flutter lift
+  if (pf > 0.004) {
     g.save();
-    g.globalAlpha = 0.35;
-    g.fillStyle = '#ece0c0';
+    g.globalAlpha = 0.40;
+    g.fillStyle = '#e8dab5';
     g.beginPath();
-    g.moveTo(155, -5);
-    g.bezierCurveTo(165, -25, 172, -40, 155, -55);
-    g.bezierCurveTo(145, -42, 143, -20, 145, -5);
+    g.moveTo(W_PAGE + 5, -4);
+    g.bezierCurveTo(W_PAGE + 18, -28, W_PAGE + 20, -48, W_PAGE + 5, -62);
+    g.bezierCurveTo(W_PAGE - 6, -46, W_PAGE - 5, -26, W_PAGE - 3, -4);
     g.closePath();
     g.fill();
     g.strokeStyle = INK2; g.lineWidth = 0.8; g.stroke();
@@ -424,29 +457,29 @@ function drawBook(pageFlutter) {
   }
   g.restore();
 
-  /* left-page outline */
+  /* ── left-page outline ──────────────────────────────────────────────── */
   g.beginPath(); leftPage();
-  g.strokeStyle = INK2; g.lineWidth = 1.6; g.stroke();
+  g.strokeStyle = INK2; g.lineWidth = 1.7; g.stroke();
 
-  /* spine */
-  const spG = g.createLinearGradient(bx-9, 0, bx+9, 0);
+  /* ── spine ──────────────────────────────────────────────────────────── */
+  const spG = g.createLinearGradient(bx-10, 0, bx+10, 0);
   spG.addColorStop(0,   '#4a2010');
-  spG.addColorStop(0.4, '#7a3818');
+  spG.addColorStop(0.5, '#8a4020');
   spG.addColorStop(1,   '#3a1808');
   g.fillStyle = spG;
   g.beginPath();
-  g.moveTo(bx-9, by-82); g.lineTo(bx+9, by-82);
-  g.lineTo(bx+9, by+66); g.lineTo(bx-9, by+66);
+  g.moveTo(bx-10, by-88); g.lineTo(bx+10, by-88);
+  g.lineTo(bx+10, by+64); g.lineTo(bx-10, by+64);
   g.closePath();
   g.fill();
 
-  // page-stack edges (left)
-  g.strokeStyle = PAPER2; g.lineWidth = 0.35; g.globalAlpha = 0.35;
-  for (let e = 0; e < 12; e++) {
-    const f = e / 12;
+  // page-stack left side
+  g.strokeStyle = PAPER2; g.lineWidth = 0.4; g.globalAlpha = 0.30;
+  for (let e = 0; e < 14; e++) {
+    const f = e / 14;
     g.beginPath();
-    g.moveTo(bx - lerp(9, 165, f), by + lerp(-82, -10, f*0.5));
-    g.lineTo(bx - lerp(9, 165, f), by + lerp(66,  20, f*0.5));
+    g.moveTo(bx - lerp(10, W_PAGE, f),   by + lerp(-88, -18, f*0.4));
+    g.lineTo(bx - lerp(10, W_PAGE, f),   by + lerp( 64,  18, f*0.4));
     g.stroke();
   }
   g.globalAlpha = 1;
@@ -564,9 +597,9 @@ function drawCandle() {
 
 /* ─── DRAW: cat character ────────────────────────────────────────────────── */
 function drawCat(glassesLift) {
-  const cx  = 725;
-  const bodyY = 572;
-  const headY = 392;
+  const cx  = 770;
+  const bodyY = 568;
+  const headY = 388;
   const breathe = Math.sin(t * 0.82) * 2.8;
 
   // tail sway
