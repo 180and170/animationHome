@@ -1,0 +1,598 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Cursor Cat · 交互动画</title>
+  <style>
+    /* ─── Reset ──────────────────────────────────────────── */
+    *, *::before, *::after { margin: 0; padding: 0; box-sizing: border-box; }
+
+    /* ─── Page ───────────────────────────────────────────── */
+    body {
+      background: #ffffff;
+      min-height: 100vh;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+      overflow: hidden;
+      cursor: none;
+      user-select: none;
+    }
+
+    /* ─── Custom cursor ──────────────────────────────────── */
+    .cursor {
+      position: fixed;
+      width: 18px;
+      height: 18px;
+      border: 1.5px solid rgba(120, 80, 220, 0.5);
+      border-radius: 50%;
+      pointer-events: none;
+      z-index: 9999;
+      transform: translate(-50%, -50%);
+      transition: width 0.2s, height 0.2s, background 0.2s;
+      mix-blend-mode: multiply;
+    }
+    .cursor.hovering {
+      width: 32px;
+      height: 32px;
+      background: rgba(120, 80, 220, 0.08);
+    }
+
+    /* ─── Title ──────────────────────────────────────────── */
+    .title {
+      position: absolute;
+      top: 36px;
+      font-size: 13px;
+      letter-spacing: 0.18em;
+      color: #bbb;
+      text-transform: uppercase;
+      font-weight: 400;
+    }
+
+    /* ─── Scene ──────────────────────────────────────────── */
+    .scene {
+      position: relative;
+      width: 420px;
+      height: 420px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+    }
+
+    /* ─── Glow Layers ────────────────────────────────────── */
+    /*
+      Three images show the glow in different positions:
+        State 0 (idle/left):  glow at bottom-left  (Image 1)
+        State 1 (happy/top):  glow at top-center   (Image 2)
+        State 2 (tilt/upper): glow at top-left     (Image 3)
+      We animate glow position + colors per state.
+    */
+    .glow-wrap {
+      position: absolute;
+      inset: 0;
+      pointer-events: none;
+      transition: transform 1.2s cubic-bezier(0.4, 0, 0.2, 1);
+    }
+
+    .glow-blob {
+      position: absolute;
+      border-radius: 50%;
+      pointer-events: none;
+      transition: all 1.0s cubic-bezier(0.4, 0, 0.2, 1);
+    }
+
+    /* Cyan blob */
+    .glow-cyan {
+      width: 240px;
+      height: 190px;
+      background: radial-gradient(ellipse at center,
+        rgba(0, 210, 255, 0.80) 0%,
+        rgba(30, 160, 255, 0.50) 40%,
+        transparent 72%);
+      filter: blur(40px);
+      /* idle position: bottom-left */
+      left: 2%;
+      top: 56%;
+      transform: translate(0, -50%);
+    }
+
+    /* Purple blob */
+    .glow-purple {
+      width: 200px;
+      height: 230px;
+      background: radial-gradient(ellipse at center,
+        rgba(175, 70, 255, 0.65) 0%,
+        rgba(130, 50, 210, 0.35) 45%,
+        transparent 72%);
+      filter: blur(44px);
+      left: 14%;
+      top: 48%;
+      transform: translate(0, -50%);
+    }
+
+    /* Pink accent */
+    .glow-pink {
+      width: 130px;
+      height: 110px;
+      background: radial-gradient(ellipse at center,
+        rgba(255, 100, 200, 0.45) 0%,
+        transparent 70%);
+      filter: blur(28px);
+      left: 28%;
+      top: 62%;
+      transform: translate(0, -50%);
+      transition: all 1.0s cubic-bezier(0.4, 0, 0.2, 1);
+    }
+
+    /* ─── Cat float wrapper ──────────────────────────────── */
+    .cat-float {
+      position: relative;
+      z-index: 10;
+      animation: floatAnim 3.6s ease-in-out infinite;
+      will-change: transform;
+    }
+
+    @keyframes floatAnim {
+      0%, 100% { transform: translateY(0px); }
+      50%       { transform: translateY(-13px); }
+    }
+
+    /* Perspective wrapper for 3-axis tilt */
+    .cat-perspective {
+      perspective: 600px;
+      perspective-origin: 50% 50%;
+    }
+
+    .cat-tilt {
+      transition: transform 0.5s cubic-bezier(0.34, 1.4, 0.64, 1);
+      transform-style: preserve-3d;
+      will-change: transform;
+    }
+
+    /* ─── SVG cat ────────────────────────────────────────── */
+    .cat-svg {
+      display: block;
+      cursor: pointer;
+      /* drop-shadow for ambient depth */
+      filter: drop-shadow(0 16px 48px rgba(0, 0, 0, 0.12));
+      transition: filter 0.6s ease;
+    }
+
+    .cat-svg:hover {
+      filter: drop-shadow(0 16px 56px rgba(100, 50, 220, 0.18));
+    }
+
+    /* ─── Eye group visibility ───────────────────────────── */
+    .eyes-open-group,
+    .eyes-happy-group,
+    .eyes-blink-group {
+      transition: opacity 0.08s ease;
+    }
+
+    /* Default: open */
+    .eyes-open  .eyes-open-group  { opacity: 1; }
+    .eyes-open  .eyes-happy-group { opacity: 0; }
+    .eyes-open  .eyes-blink-group { opacity: 0; }
+
+    /* Happy: ∪ curves */
+    .eyes-happy .eyes-open-group  { opacity: 0; }
+    .eyes-happy .eyes-happy-group { opacity: 1; }
+    .eyes-happy .eyes-blink-group { opacity: 0; }
+
+    /* Blink: thin ellipse */
+    .eyes-blink .eyes-open-group  { opacity: 0; }
+    .eyes-blink .eyes-happy-group { opacity: 0; }
+    .eyes-blink .eyes-blink-group { opacity: 1; }
+
+    /* ─── State buttons ──────────────────────────────────── */
+    .controls {
+      position: absolute;
+      bottom: 44px;
+      display: flex;
+      gap: 10px;
+    }
+
+    .btn {
+      padding: 7px 20px;
+      border-radius: 24px;
+      border: 1px solid rgba(140, 90, 240, 0.22);
+      background: rgba(140, 90, 240, 0.04);
+      color: #999;
+      font-size: 12px;
+      letter-spacing: 0.04em;
+      cursor: pointer;
+      transition: all 0.2s ease;
+      outline: none;
+    }
+
+    .btn:hover {
+      background: rgba(140, 90, 240, 0.10);
+      color: #777;
+      border-color: rgba(140, 90, 240, 0.38);
+      transform: translateY(-1px);
+    }
+
+    .btn.active {
+      border-color: rgba(140, 90, 240, 0.55);
+      background: rgba(140, 90, 240, 0.10);
+      color: #8b5cf6;
+    }
+
+    /* ─── State hint ─────────────────────────────────────── */
+    .state-hint {
+      position: absolute;
+      top: 32px;
+      font-size: 11px;
+      letter-spacing: 0.12em;
+      color: #d0d0e0;
+      text-transform: uppercase;
+      transition: opacity 0.4s;
+    }
+
+    /* ─── Responsive ─────────────────────────────────────── */
+    @media (max-width: 480px) {
+      .scene { width: 320px; height: 320px; }
+      .cat-svg { width: 220px; height: 220px; }
+    }
+  </style>
+</head>
+<body>
+
+<!-- Custom cursor -->
+<div class="cursor" id="cursor"></div>
+
+<h1 class="title">Cursor Cat</h1>
+
+<div class="scene" id="scene">
+
+  <!-- Glow blobs (behind cat) -->
+  <div class="glow-wrap" id="glowWrap">
+    <div class="glow-blob glow-cyan"   id="glowCyan"></div>
+    <div class="glow-blob glow-purple" id="glowPurple"></div>
+    <div class="glow-blob glow-pink"   id="glowPink"></div>
+  </div>
+
+  <!-- Cat character -->
+  <div class="cat-float eyes-open" id="catFloat">
+    <div class="cat-perspective">
+      <div class="cat-tilt" id="catTilt">
+        <svg
+          class="cat-svg"
+          id="catSvg"
+          viewBox="0 0 240 240"
+          width="300" height="300"
+          xmlns="http://www.w3.org/2000/svg"
+        >
+          <defs>
+            <!--
+              softEdge: feathers the body silhouette so edges look like the
+              blurry cat in the reference images.
+            -->
+            <filter id="softEdge" x="-18%" y="-18%" width="136%" height="136%">
+              <feGaussianBlur in="SourceGraphic" stdDeviation="5.5" result="blur"/>
+              <feComposite in="blur" in2="blur" operator="over"/>
+            </filter>
+
+            <!-- Lighter blur for ears so their tips still read clearly -->
+            <filter id="earBlur" x="-30%" y="-30%" width="160%" height="160%">
+              <feGaussianBlur in="SourceGraphic" stdDeviation="4"/>
+            </filter>
+
+            <!-- Eye inner glow (subtle white radial) -->
+            <radialGradient id="eyeGradient" cx="42%" cy="38%" r="60%">
+              <stop offset="0%"   stop-color="#ffffff"/>
+              <stop offset="100%" stop-color="#e8e8f8"/>
+            </radialGradient>
+
+            <!-- Very slight eye softness -->
+            <filter id="eyeSoft" x="-30%" y="-30%" width="160%" height="160%">
+              <feGaussianBlur in="SourceGraphic" stdDeviation="0.8"/>
+            </filter>
+          </defs>
+
+          <!--
+            ── Body silhouette ──────────────────────────────────
+            Slightly trapezoidal head: wider at top, rounded bottom corners.
+            Two pointed ears emerge from the upper-left and upper-right.
+            The whole group gets the softEdge blur to match the reference.
+          -->
+          <g filter="url(#softEdge)">
+            <!-- Left ear -->
+            <polygon
+              points="28,82  50,10  84,78"
+              fill="#06060f"
+            />
+            <!-- Right ear -->
+            <polygon
+              points="156,78  190,10  212,82"
+              fill="#06060f"
+            />
+            <!-- Main head: rounded-rect shape -->
+            <rect
+              x="18" y="66"
+              width="204" height="162"
+              rx="40" ry="40"
+              fill="#06060f"
+            />
+            <!-- Top fill to bridge ear bases with head -->
+            <rect
+              x="18" y="66"
+              width="204" height="50"
+              rx="0" ry="0"
+              fill="#06060f"
+            />
+          </g>
+
+          <!--
+            ── Eyes ─────────────────────────────────────────────
+            Three groups toggled via CSS class on .cat-float:
+              .eyes-open  → white circles
+              .eyes-happy → ∪ arc paths
+              .eyes-blink → thin ellipses
+          -->
+
+          <!-- Open eyes (circles) -->
+          <g class="eyes-open-group" filter="url(#eyeSoft)">
+            <circle cx="88"  cy="142" r="15" fill="url(#eyeGradient)"/>
+            <circle cx="152" cy="142" r="15" fill="url(#eyeGradient)"/>
+          </g>
+
+          <!-- Happy eyes (∪ upward arcs — squinting joyfully) -->
+          <g class="eyes-happy-group" filter="url(#eyeSoft)">
+            <path
+              d="M 73 138 Q 88 155 103 138"
+              stroke="white" stroke-width="4"
+              stroke-linecap="round" fill="none"
+            />
+            <path
+              d="M 137 138 Q 152 155 167 138"
+              stroke="white" stroke-width="4"
+              stroke-linecap="round" fill="none"
+            />
+          </g>
+
+          <!-- Blink / closed eyes (thin horizontal ellipses) -->
+          <g class="eyes-blink-group" filter="url(#eyeSoft)">
+            <ellipse cx="88"  cy="145" rx="14" ry="4.5" fill="white"/>
+            <ellipse cx="152" cy="145" rx="14" ry="4.5" fill="white"/>
+          </g>
+
+        </svg>
+      </div>
+    </div>
+  </div>
+
+  <!-- State label -->
+  <div class="state-hint" id="stateHint">idle · click to interact</div>
+
+</div>
+
+<!-- State controls -->
+<div class="controls">
+  <button class="btn active" id="btnIdle"   onclick="setStateManual('idle')">普通 idle</button>
+  <button class="btn"        id="btnHappy"  onclick="setStateManual('happy')">开心 happy</button>
+  <button class="btn"        id="btnSleepy" onclick="setStateManual('sleepy')">睡觉 sleepy</button>
+  <button class="btn"        id="btnAlert"  onclick="setStateManual('alert')">警觉 alert</button>
+</div>
+
+<script>
+// ─── Elements ──────────────────────────────────────────────
+const cursor     = document.getElementById('cursor');
+const scene      = document.getElementById('scene');
+const catFloat   = document.getElementById('catFloat');
+const catTilt    = document.getElementById('catTilt');
+const catSvg     = document.getElementById('catSvg');
+const glowCyan   = document.getElementById('glowCyan');
+const glowPurple = document.getElementById('glowPurple');
+const glowPink   = document.getElementById('glowPink');
+const stateHint  = document.getElementById('stateHint');
+
+const BTNS = {
+  idle:   document.getElementById('btnIdle'),
+  happy:  document.getElementById('btnHappy'),
+  sleepy: document.getElementById('btnSleepy'),
+  alert:  document.getElementById('btnAlert'),
+};
+
+// ─── State ─────────────────────────────────────────────────
+let currentState = 'idle';
+let blinkTimer   = null;
+let revertTimer  = null;
+
+// ─── Glow positions per state ──────────────────────────────
+/*
+  State → { cyan: {left,top}, purple: {left,top}, pink: {left,top} }
+  Mirrors the three reference images:
+    idle   ≈ Image 1  (glow bottom-left)
+    happy  ≈ Image 2  (glow top-center / upper area)
+    sleepy ≈ Image 2  (dimmed, similar position)
+    alert  ≈ Image 3  (glow top-left, cat tilted)
+*/
+const GLOW_POSITIONS = {
+  idle: {
+    cyan:   { left: '2%',  top: '56%', opacity: '0.85', width: '240px', height: '190px' },
+    purple: { left: '14%', top: '48%', opacity: '0.70', width: '200px', height: '230px' },
+    pink:   { left: '28%', top: '62%', opacity: '0.50', width: '130px', height: '110px' },
+  },
+  happy: {
+    cyan:   { left: '18%', top: '22%', opacity: '0.90', width: '260px', height: '200px' },
+    purple: { left: '28%', top: '14%', opacity: '0.75', width: '220px', height: '260px' },
+    pink:   { left: '38%', top: '30%', opacity: '0.80', width: '160px', height: '140px' },
+  },
+  sleepy: {
+    cyan:   { left: '18%', top: '22%', opacity: '0.30', width: '240px', height: '190px' },
+    purple: { left: '28%', top: '14%', opacity: '0.25', width: '200px', height: '230px' },
+    pink:   { left: '38%', top: '30%', opacity: '0.10', width: '130px', height: '110px' },
+  },
+  alert: {
+    cyan:   { left: '8%',  top: '28%', opacity: '0.95', width: '220px', height: '180px' },
+    purple: { left: '20%', top: '18%', opacity: '0.85', width: '190px', height: '220px' },
+    pink:   { left: '30%', top: '36%', opacity: '0.65', width: '120px', height: '100px' },
+  },
+};
+
+function applyGlowPos(state) {
+  const p = GLOW_POSITIONS[state];
+  Object.assign(glowCyan.style,   p.cyan);
+  Object.assign(glowPurple.style, p.purple);
+  Object.assign(glowPink.style,   p.pink);
+}
+
+// ─── Eye state helpers ──────────────────────────────────────
+function setEyes(eyeState) {
+  catFloat.classList.remove('eyes-open', 'eyes-happy', 'eyes-blink');
+  catFloat.classList.add('eyes-' + eyeState);
+}
+
+// ─── Blink scheduler ───────────────────────────────────────
+function triggerBlink() {
+  if (currentState !== 'idle') return;
+  setEyes('blink');
+  setTimeout(() => {
+    if (currentState === 'idle') setEyes('open');
+    scheduleBlink();
+  }, 110);
+}
+
+function scheduleBlink() {
+  clearTimeout(blinkTimer);
+  if (currentState === 'idle') {
+    blinkTimer = setTimeout(triggerBlink, 1800 + Math.random() * 3200);
+  }
+}
+
+// ─── Float speed per state ──────────────────────────────────
+const FLOAT_DURATIONS = {
+  idle:   '3.6s',
+  happy:  '2.2s',
+  sleepy: '6.0s',
+  alert:  '1.8s',
+};
+
+// ─── Main state setter ─────────────────────────────────────
+function setState(state) {
+  clearTimeout(blinkTimer);
+  clearTimeout(revertTimer);
+  currentState = state;
+  stateHint.textContent = state;
+  catFloat.style.animationDuration = FLOAT_DURATIONS[state];
+  applyGlowPos(state);
+
+  switch (state) {
+    case 'idle':
+      setEyes('open');
+      catTilt.style.transform = 'rotateX(0deg) rotateY(0deg) rotateZ(0deg)';
+      catSvg.style.filter = 'drop-shadow(0 16px 48px rgba(0,0,0,0.12))';
+      scheduleBlink();
+      break;
+
+    case 'happy':
+      setEyes('happy');
+      catTilt.style.transform = 'rotateX(0deg) rotateY(0deg) rotateZ(0deg)';
+      catSvg.style.filter = 'drop-shadow(0 18px 56px rgba(100,50,220,0.18))';
+      // Auto-return to idle after 2.5 s
+      revertTimer = setTimeout(() => setStateManual('idle'), 2500);
+      break;
+
+    case 'sleepy':
+      setEyes('happy');
+      // Slow tilt as if drowsy
+      catTilt.style.transform = 'rotateZ(-8deg)';
+      catSvg.style.filter = 'drop-shadow(0 16px 40px rgba(0,0,0,0.08))';
+      break;
+
+    case 'alert':
+      setEyes('open');
+      // Reference Image 3: noticeable tilt ~28°, like cat turning head
+      catTilt.style.transform = 'rotateZ(-28deg) rotateY(12deg)';
+      catSvg.style.filter = 'drop-shadow(0 16px 56px rgba(80,30,200,0.22))';
+      break;
+  }
+}
+
+function setStateManual(state) {
+  Object.values(BTNS).forEach(b => b.classList.remove('active'));
+  BTNS[state].classList.add('active');
+  setState(state);
+}
+
+// ─── Mouse tracking ─────────────────────────────────────────
+let mouseX = window.innerWidth  / 2;
+let mouseY = window.innerHeight / 2;
+let rafId  = null;
+
+function onMouseMove(e) {
+  mouseX = e.clientX;
+  mouseY = e.clientY;
+
+  // Custom cursor
+  cursor.style.left = mouseX + 'px';
+  cursor.style.top  = mouseY + 'px';
+
+  if (rafId) return;
+  rafId = requestAnimationFrame(() => {
+    rafId = null;
+    if (currentState !== 'idle') return;
+
+    const rect = scene.getBoundingClientRect();
+    const cx = rect.left + rect.width  / 2;
+    const cy = rect.top  + rect.height / 2;
+    const dx = (mouseX - cx) / (rect.width  / 2);  // -1 … +1
+    const dy = (mouseY - cy) / (rect.height / 2);  // -1 … +1
+
+    // Subtle 3D tilt: RotateX responds to vertical mouse, RotateY to horizontal
+    const rotX = dy * -6;   // tilt forward/backward
+    const rotY = dx *  7;   // tilt left/right
+    const rotZ = dx * -2;   // slight roll
+    catTilt.style.transform =
+      `rotateX(${rotX}deg) rotateY(${rotY}deg) rotateZ(${rotZ}deg)`;
+
+    // Glow shifts gently with mouse — idle state only
+    const gx = dx * 18;
+    const gy = dy * 12;
+    glowCyan.style.left   = `calc(2%  + ${gx}px)`;
+    glowCyan.style.top    = `calc(56% + ${gy}px)`;
+    glowPurple.style.left = `calc(14% + ${gx * 0.7}px)`;
+    glowPurple.style.top  = `calc(48% + ${gy * 0.7}px)`;
+  });
+}
+
+document.addEventListener('mousemove', onMouseMove);
+
+// Cursor hover detection on cat
+catSvg.addEventListener('mouseenter', () => cursor.classList.add('hovering'));
+catSvg.addEventListener('mouseleave', () => cursor.classList.remove('hovering'));
+
+// ─── Click = happy ──────────────────────────────────────────
+catSvg.addEventListener('click', () => {
+  if (currentState !== 'happy') {
+    setStateManual('happy');
+  }
+});
+
+// ─── Glow pulse animation ───────────────────────────────────
+/*
+  Beyond CSS transitions, add a subtle continuous opacity pulse
+  on the cyan blob to make the glow feel "alive".
+*/
+let glowT = 0;
+function animateGlow() {
+  glowT += 0.012;
+  const pulse = 0.88 + Math.sin(glowT) * 0.12;
+  const p = GLOW_POSITIONS[currentState];
+  // Apply pulse only if no CSS transition is in flight
+  glowCyan.style.opacity   = (parseFloat(p.cyan.opacity)   * pulse).toFixed(3);
+  glowPurple.style.opacity = (parseFloat(p.purple.opacity) * (0.92 + Math.sin(glowT + 1) * 0.08)).toFixed(3);
+  requestAnimationFrame(animateGlow);
+}
+
+// ─── Boot ───────────────────────────────────────────────────
+applyGlowPos('idle');
+setState('idle');
+animateGlow();
+</script>
+</body>
+</html>
